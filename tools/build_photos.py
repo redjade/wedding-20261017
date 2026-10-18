@@ -22,7 +22,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from PIL import Image, ImageCms, ImageOps
+from PIL import Image, ImageCms, ImageEnhance, ImageFilter, ImageOps
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "images-full-size"
@@ -34,9 +34,13 @@ SIZES = {800: 84, 1600: 86, 2560: 90}
 
 # 카카오톡 등 링크 미리보기에 쓸 사진(확장자 없는 파일 이름). None이면 첫 가로 사진.
 OG_PHOTO: str | None = "DSC_3548"
-OG_SIZE = (1200, 1200)
+# 카카오톡·텔레그램은 정사각형을 줘도 가운데 1.91:1 띠만 보여 주므로 처음부터 그 비율로 만든다.
+OG_SIZE = (1200, 630)
 # 미리보기 사진을 어디쯤에서 자를지(가로, 세로 0~1). 세로 사진은 세로 값을 낮추면 위쪽이 남는다.
 OG_CENTER = (0.5, 0.3)
+# 세로 사진에서 담을 위아래 범위(사진 높이에 대한 비율). 띠보다 길면 줄여 가운데 두고,
+# 좌우 빈 곳은 같은 사진을 흐리게 깔아 채운다. None이면 OG_CENTER 기준으로 꽉 차게 자른다.
+OG_RANGE: tuple[float, float] | None = (0.15, 0.66)
 
 EXTS = {".jpg", ".jpeg"}
 
@@ -111,6 +115,13 @@ def make_og(photos: list[dict]) -> str | None:
         return None
     with Image.open(OUT / str(max(SIZES)) / f"{name}.jpg") as im:
         og = ImageOps.fit(im, OG_SIZE, Image.Resampling.LANCZOS, centering=OG_CENTER)
+        if OG_RANGE:
+            top, bottom = (round(im.height * f) for f in OG_RANGE)
+            part = im.crop((0, top, im.width, bottom))
+            w = round(part.width * OG_SIZE[1] / part.height)
+            if w < OG_SIZE[0]:
+                og = ImageEnhance.Brightness(og.filter(ImageFilter.GaussianBlur(36))).enhance(0.92)
+                og.paste(part.resize((w, OG_SIZE[1]), Image.Resampling.LANCZOS), ((OG_SIZE[0] - w) // 2, 0))
         og.save(DOCS / "og.jpg", "JPEG", quality=85, optimize=True, progressive=True)
     return name
 
